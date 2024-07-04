@@ -53,9 +53,9 @@ class NaturalSpeech2(nn.Module):
         self.quantizer = codec_model.quantizer
 
     @torch.no_grad()
-    def code_to_latent(self, code):
-        latent = self.quantizer.decode(code.transpose(0, 1))
-        return latent
+    def code_to_latent(self, code):  # [1,16,670]
+        latent = self.quantizer.decode(code.transpose(0, 1))  # [16, 1, 670]
+        return latent  # [1,128,670]
 
     def latent_to_code(self, latent, nq=16):
         residual = latent
@@ -146,26 +146,26 @@ class NaturalSpeech2(nn.Module):
     @torch.no_grad()
     def inference(
         self, ref_code=None, phone_id=None, ref_mask=None, inference_steps=1000
-    ):
-        ref_latent = self.code_to_latent(ref_code)
+    ):  # ref_code [1,16,670]  phone_id [1,8]  ref_mask [1,670] inference_steps 200
+        ref_latent = self.code_to_latent(ref_code)  # [1,128,670]
 
-        if self.latent_dim is not None:
-            ref_latent = self.prompt_lin(ref_latent.transpose(1, 2))
+        if self.latent_dim is not None:  # self.latent_dim 128
+            ref_latent = self.prompt_lin(ref_latent.transpose(1, 2))  # ref_latent [1,670,128] -> [1,670,512]
+            # self.prompt_lin: Linear(in_features=128, out_features=512, bias=True)
+        ref_latent = self.prompt_encoder(ref_latent, ref_mask, condition=None)  # TransformerEncoder -> [1,670,512]
+        spk_emb = ref_latent.transpose(1, 2)  # (B, d, T')  # [1,670,512] -> spk_emb = [1, 512,670]
 
-        ref_latent = self.prompt_encoder(ref_latent, ref_mask, condition=None)
-        spk_emb = ref_latent.transpose(1, 2)  # (B, d, T')
-
-        spk_query_emb = self.query_emb(
-            torch.arange(self.query_emb_num).to(ref_latent.device)
-        ).repeat(
+        spk_query_emb = self.query_emb(  #  self.query_emb: Embedding(32, 512)
+            torch.arange(self.query_emb_num).to(ref_latent.device)  # self.query_emb_num = 32
+        ).repeat(   # [0, 1, 2, ..., 30, 31] -> [32,512] -> [1,32,512]
             ref_latent.shape[0], 1, 1
         )  # (B, query_emb_num, d)
-        spk_query_emb, _ = self.query_attn(
+        spk_query_emb, _ = self.query_attn(  # MultiheadAttention Q=[1,32,512] K= [1,670,512] V=[1,670,512]
             spk_query_emb,
             spk_emb.transpose(1, 2),
             spk_emb.transpose(1, 2),
             key_padding_mask=~(ref_mask.bool()),
-        )  # (B, query_emb_num, d)
+        )  # (B, query_emb_num, d)  # spk_query_emb -> [1,32,512]
 
         prior_out = self.prior_encoder(
             phone_id=phone_id,
@@ -178,15 +178,15 @@ class NaturalSpeech2(nn.Module):
             is_inference=True,
         )
         prior_condition = prior_out["prior_out"]  # (B, T, d)
-
-        z = torch.randn(
+        # prior_condition [1,60,512]
+        z = torch.randn(  # z [1,128,60] 标注正态分布
             prior_condition.shape[0], self.latent_dim, prior_condition.shape[1]
         ).to(ref_latent.device) / (1.20)
         x0 = self.diffusion.reverse_diffusion(
             z, None, prior_condition, inference_steps, spk_query_emb
-        )
+        )  # z [1,128,60] None prior_condition [1,60,512] inference_steps 200  spk_query_emb [1,32,512]
 
-        return x0, prior_out
+        return x0, prior_out  # x0 [1,128,60]
 
     @torch.no_grad()
     def reverse_diffusion_from_t(

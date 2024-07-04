@@ -68,28 +68,28 @@ class Diffusion(nn.Module):
         xt = mean + z * torch.sqrt(variance) * self.noise_factor
         return xt, z
 
-    @torch.no_grad()
+    @torch.no_grad()  # xt [1,128,60] x_mask None cond [1,60,512] spk_query_emb [1,32,512] diffusion_step [0.9975] h 0.005
     def cal_dxt(self, xt, x_mask, cond, spk_query_emb, diffusion_step, h):
-        time_step = diffusion_step.unsqueeze(-1).unsqueeze(-1)
-        cum_beta = self.get_cum_beta(time_step=time_step)
-        beta_t = self.get_beta_t(time_step=time_step)
-        x0_pred = self.diff_estimator(xt, x_mask, cond, diffusion_step, spk_query_emb)
+        time_step = diffusion_step.unsqueeze(-1).unsqueeze(-1)  # time_step [1,1,1]
+        cum_beta = self.get_cum_beta(time_step=time_step)  # cum_beta [1,1,1]
+        beta_t = self.get_beta_t(time_step=time_step)  # beta_t [1,1,1]
+        x0_pred = self.diff_estimator(xt, x_mask, cond, diffusion_step, spk_query_emb)  # x0_pred [1,128,60]
         mean_pred = x0_pred * torch.exp(-0.5 * cum_beta / (self.sigma**2))
         noise_pred = xt - mean_pred
         variance = (self.sigma**2) * (1.0 - torch.exp(-cum_beta / (self.sigma**2)))
         logp = -noise_pred / (variance + 1e-8)
         dxt = -0.5 * h * beta_t * (logp + xt / (self.sigma**2))
-        return dxt
+        return dxt  # dxt [1,128,60]
 
-    @torch.no_grad()
+    @torch.no_grad()  # z [1,128,60] x_mask None cond [1,60,512] n_timesteps 200  spk_query_emb [1,32,512]
     def reverse_diffusion(self, z, x_mask, cond, n_timesteps, spk_query_emb):
-        h = 1.0 / max(n_timesteps, 1)
+        h = 1.0 / max(n_timesteps, 1)  # h = 1.0/200=0.005
         xt = z
         for i in range(n_timesteps):
             t = (1.0 - (i + 0.5) * h) * torch.ones(
                 z.shape[0], dtype=z.dtype, device=z.device
-            )
-            dxt = self.cal_dxt(xt, x_mask, cond, spk_query_emb, diffusion_step=t, h=h)
+            )  # t = (1.0- (0 + 0.5) * 0.005) * [1] = [0.9975]
+            dxt = self.cal_dxt(xt, x_mask, cond, spk_query_emb, diffusion_step=t, h=h)  # dxt [1,128,60]
             xt_ = xt - dxt
             if self.cfg.ode_solver == "midpoint":
                 x_mid = 0.5 * (xt_ + xt)
@@ -97,9 +97,9 @@ class Diffusion(nn.Module):
                     x_mid, x_mask, cond, spk_query_emb, diffusion_step=t + 0.5 * h, h=h
                 )
                 xt = xt - dxt
-            elif self.cfg.ode_solver == "euler":
+            elif self.cfg.ode_solver == "euler":  # yes
                 xt = xt_
-        return xt
+        return xt  # xt [1,128,60]
 
     @torch.no_grad()
     def reverse_diffusion_from_t(

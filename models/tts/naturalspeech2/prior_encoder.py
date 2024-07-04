@@ -48,14 +48,14 @@ class PriorEncoder(nn.Module):
 
     def forward(
         self,
-        phone_id,
+        phone_id,  # [1,8]
         duration=None,
         pitch=None,
         phone_mask=None,
         mask=None,
-        ref_emb=None,
-        ref_mask=None,
-        is_inference=False,
+        ref_emb=None,  # [1,512,670]
+        ref_mask=None,  # [1,670]
+        is_inference=False,  # True
     ):
         """
         input:
@@ -73,9 +73,9 @@ class PriorEncoder(nn.Module):
         pred_pitch: (B, T)
         """
 
-        x = self.encoder(phone_id, phone_mask, ref_emb.transpose(1, 2))
+        x = self.encoder(phone_id, phone_mask, ref_emb.transpose(1, 2))  # TransformerEncoder [1,8,512]
         # print(torch.min(x), torch.max(x))
-        dur_pred_out = self.duration_predictor(x, phone_mask, ref_emb, ref_mask)
+        dur_pred_out = self.duration_predictor(x, phone_mask, ref_emb, ref_mask) # phone_mask None  ref_emb [1,512,670] ref_mask [1,670]
         # dur_pred_out: {dur_pred_log, dur_pred, dur_pred_round}
 
         if is_inference or duration is None:
@@ -86,12 +86,12 @@ class PriorEncoder(nn.Module):
             )
         else:
             x, mel_len = self.length_regulator(x, duration, max_len=pitch.shape[1])
-
+        # x [1,60,512] mel_len [60]
         pitch_pred_log = self.pitch_predictor(x, mask, ref_emb, ref_mask)
-
-        if is_inference or pitch is None:
+        # pitch_pred_log [1,60]
+        if is_inference or pitch is None:  # self.pitch_bins   [50,1100]  len(self.pitch_bins) = 511
             pitch_tokens = torch.bucketize(pitch_pred_log.exp(), self.pitch_bins)
-            pitch_embedding = self.pitch_embedding(pitch_tokens)
+            pitch_embedding = self.pitch_embedding(pitch_tokens)  # pitch_embedding [1,60,512]
         else:
             pitch_tokens = torch.bucketize(pitch, self.pitch_bins)
             pitch_embedding = self.pitch_embedding(pitch_tokens)

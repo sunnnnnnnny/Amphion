@@ -434,7 +434,8 @@ def _load_config(config_fn, lowercase=False):
     config_ = json5.loads(data)
     if "base_config" in config_:
         # load configurations from new path
-        p_config_path = os.path.join(os.getenv("WORK_DIR"), config_["base_config"])
+        WORK_DIR = "/Users/zhangsan/workspace/2024_work/Amphion"
+        p_config_path = os.path.join(WORK_DIR, config_["base_config"])
         p_config_ = _load_config(p_config_path)
         config_ = override_config(p_config_, config_)
     if lowercase:

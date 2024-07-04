@@ -22,11 +22,11 @@ class StyleAdaptiveLayerNorm(nn.Module):
 
     def forward(self, x, condition):
         # x: (B, T, d); condition: (B, T, d)
-
-        style = self.style(torch.mean(condition, dim=1, keepdim=True))
-
+        # x [1,8,512] condition [1,670,512]
+        style = self.style(torch.mean(condition, dim=1, keepdim=True))  # [1,1,512] -> [1,1,1024]
+        # self.style : Linear(in_features=512, out_features=1024, bias=True)
         gamma, beta = style.chunk(2, -1)
-
+        # gamma [1,1,512]  beta [1,1,512]
         out = self.norm(x)
 
         out = gamma * out + beta
@@ -284,7 +284,7 @@ class DurationPredictor(nn.Module):
         self.linear.weight.data.normal_(0.0, 0.02)
 
     def forward(self, x, mask, ref_emb, ref_mask):
-        """
+        """  # x:[1,8,512] mask:None ref_emb: [1,512,670] ref_mask: [1,670]
         input:
         x: (B, N, d)
         mask: (B, N), mask is 0
@@ -300,12 +300,12 @@ class DurationPredictor(nn.Module):
         input_ref_mask = ~(ref_mask.bool())  # (B, T')
         # print(input_ref_mask)
 
-        x = x.transpose(1, -1)  # (B, N, d) -> (B, d, N)
-
-        for idx, (conv, act, ln, dropout) in enumerate(self.conv):
+        x = x.transpose(1, -1)  # (B, N, d) -> (B, d, N)  # [1,8,512] -> [1,512,8]
+        # conv1d(512,512, k = 3, s = 1, p = 1)  ReLU  LN  Dropout(0.5)
+        for idx, (conv, act, ln, dropout) in enumerate(self.conv):   # len(self.conv) = 30
             res = x
             # print(torch.min(x), torch.max(x))
-            if idx % self.cross_attn_per_layer == 0:
+            if idx % self.cross_attn_per_layer == 0:  # cross_attn_per_layer = 3
                 attn_idx = idx // self.cross_attn_per_layer
                 attn, attn_ln, attn_drop = self.cattn[attn_idx]
 
@@ -342,12 +342,12 @@ class DurationPredictor(nn.Module):
             if mask is not None:
                 x = x * mask.to(x.dtype)[:, None, :]
 
-        x = self.linear(x.transpose(1, 2))
-        x = torch.squeeze(x, -1)
-
-        dur_pred = x.exp() - 1
+        x = self.linear(x.transpose(1, 2))  # [1,512,8]   -> [1,8,1]
+        x = torch.squeeze(x, -1)  # [1,8]
+        # [[0.6799, 1.8181, 2.1150, 2.3800, 2.3671, 2.5952, 2.0731, 2.2276]]
+        dur_pred = x.exp() - 1  # tensor([[ 0.9736,  5.1604,  7.2899,  9.8050,  9.6667, 12.3999,  6.9490,  8.2774]])
         dur_pred_round = torch.clamp(torch.round(x.exp() - 1), min=0).long()
-
+        # tensor([[ 1,  5,  7, 10, 10, 12,  7,  8]])
         return {
             "dur_pred_log": x,
             "dur_pred": dur_pred,

@@ -92,12 +92,12 @@ class ResidualBlock(nn.Module):
             self.ln = nn.LayerNorm(hidden_dim)
 
         self.dropout = nn.Dropout(self.drop_out)
-
+        # x [1,512,60] x_mask None cond [1,512,60]  diffusion_step [1,512] spk_query_emb [1,32,512]
     def forward(self, x, x_mask, cond, diffusion_step, spk_query_emb):
-        diffusion_step = self.diffusion_proj(diffusion_step).unsqueeze(-1)  # (B, d, 1)
-        cond = self.cond_proj(cond)  # (B, 2*d, T)
+        diffusion_step = self.diffusion_proj(diffusion_step).unsqueeze(-1)  # (B, d, 1) [1,512,1]  Linear(in_features=512, out_features=512, bias=True)
+        cond = self.cond_proj(cond)  # (B, 2*d, T)  # Conv1d(512, 1024, kernel_size=(1,), stride=(1,)) [1,1024,60]
 
-        y = x + diffusion_step
+        y = x + diffusion_step  # [1,512,60]  +  [1,512,1]
         if x_mask != None:
             y = y * x_mask.to(y.dtype)[:, None, :]  # (B, 2*d, T)
 
@@ -106,17 +106,17 @@ class ResidualBlock(nn.Module):
             y_ = self.ln(y_)
 
             y_, _ = self.attn(y_, spk_query_emb, spk_query_emb)  # (B, T, d)
-
-        y = self.dilated_conv(y) + cond  # (B, 2*d, T)
+        # self.dilated_conv:   Conv1d(512, 1024, kernel_size=(3,), stride=(1,), padding=(2,), dilation=(2,))
+        y = self.dilated_conv(y) + cond  # (B, 2*d, T)  y [1,1024,60]
 
         if self.has_cattn:
             y = self.film(y.transpose(1, 2), y_)  # (B, T, 2*d)
             y = y.transpose(1, 2)  # (B, 2*d, T)
 
-        gate, filter_ = torch.chunk(y, 2, dim=1)
+        gate, filter_ = torch.chunk(y, 2, dim=1)  # gate [1,512,60] filter_ [1,512,60]
         y = torch.sigmoid(gate) * torch.tanh(filter_)
-
-        y = self.out_proj(y)
+        # self.out_proj: Conv1d(512, 1024, kernel_size=(1,), stride=(1,))
+        y = self.out_proj(y)  # [1,512,60] - > [1,1024,60]
 
         residual, skip = torch.chunk(y, 2, dim=1)
 
@@ -177,30 +177,30 @@ class WaveNet(nn.Module):
         cond: (B, T, 512)
         diffusion_step: (B,)
         spk_query_emb: (B, 32, 512)
-        """
-        cond = self.cond_ln(cond)
-        cond_input = cond.transpose(1, 2)
+        """  # x [1,128,60] x_mask None cond [1,60,512]  diffusion_step [0.9975] spk_query_emb [1,32,512]
+        cond = self.cond_ln(cond)  # LN for cond
+        cond_input = cond.transpose(1, 2)  # cond_input [1,512,60]
 
-        x_input = self.in_proj(x)
+        x_input = self.in_proj(x)  # [1,512,60]
+        # self.in_proj: Conv1d(128, 512, kernel_size=(1,), stride=(1,))
+        x_input = F.relu(x_input)  # x_input [1,512,60]
 
-        x_input = F.relu(x_input)
-
-        diffusion_step = self.diffusion_embedding(diffusion_step).to(x.dtype)
-        diffusion_step = self.mlp(diffusion_step)
-
+        diffusion_step = self.diffusion_embedding(diffusion_step).to(x.dtype)  # diffusion_step [1,512]
+        diffusion_step = self.mlp(diffusion_step)  # diffusion_step [1,512]
+        # self.mlp:Linear(in_features=512, out_features=2048, bias=True)  Mish Linear(in_features=2048, out_features=512, bias=True)
         skip = []
         for _, layer in enumerate(self.layers):
             x_input, skip_connection = layer(
                 x_input, x_mask, cond_input, diffusion_step, spk_query_emb
-            )
+            )  # x_input [1,512,60] skip_connection [1,512,60]
             skip.append(skip_connection)
 
         x_input = torch.sum(torch.stack(skip), dim=0) / math.sqrt(self.num_layers)
-
+        # self.skip_proj: Conv1d(512, 512, kernel_size=(1,), stride=(1,))
         x_out = self.skip_proj(x_input)
 
         x_out = F.relu(x_out)
-
+        # self.out_proj: Conv1d(512, 128, kernel_size=(1,), stride=(1,))
         x_out = self.out_proj(x_out)  # (B, 128, T)
 
         return x_out
