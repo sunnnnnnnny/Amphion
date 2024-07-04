@@ -7,7 +7,8 @@
 ######## Build Experiment Environment ###########
 exp_dir=$(cd `dirname $0`; pwd)
 work_dir=$(dirname $(dirname $(dirname $exp_dir)))
-
+echo ${work_dir}
+echo ${exp_dir}
 export WORK_DIR=$work_dir
 export PYTHONPATH=$work_dir
 export PYTHONIOENCODING=UTF-8
@@ -15,9 +16,9 @@ export PYTHONIOENCODING=UTF-8
 ######## Set Experiment Configuration ###########
 exp_config="$exp_dir/exp_config.json"
 exp_name="ns2_libritts"
-ref_audio="$work_dir/egs/tts/NaturalSpeech2/prompt_example/ref_audio.wav"
-checkpoint_path="$work_dir/ckpts/tts/naturalspeech2_libritts/checkpoint/epoch-0089_step-0512912_loss-6.367693"
-output_dir="$work_dir/output"
+ref_audio="$work_dir/egs/tts/NaturalSpeech2/prompt_example/LJ050-0278.wav"
+checkpoint_path="/Users/zhangsan/workspace/model_hg_temp/amphion_ns2/epoch-0089_step-0512912_loss-6.367693"
+output_dir="$exp_dir/output"
 mode="single"
 
 export CUDA_VISIBLE_DEVICES="0"
@@ -39,11 +40,18 @@ case $key in
 esac
 done
 
+echo ${exp_config}
+echo ${mode}
+echo ${checkpoint_path}
+echo ${ref_audio}
+echo ${output_dir}
+
+exit 1;
 ######## Train Model ###########
 python "${work_dir}"/bins/tts/inference.py \
     --config=$exp_config \
-    --text="$text" \
+    --text="hello world" \
     --mode=$mode \
     --checkpoint_path=$checkpoint_path \
     --ref_audio=$ref_audio \
-    --output_dir=$output_dir \
+    --output_dir=$output_dir
